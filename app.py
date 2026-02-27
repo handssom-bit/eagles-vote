@@ -49,14 +49,38 @@ if st.session_state.is_admin:
 tabs = st.tabs(tab_titles)
 
 # --- Tab 1 & 2: 투표 및 현황 (이전 로직 활용) ---
+# --- Tab 1: 투표하기 ---
 with tabs[0]:
-    st.subheader("⚾ 경기 투표")
     sched_df = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
+    
     if sched_df.empty:
         st.info("현재 등록된 경기 일정이 없습니다.")
     else:
-        # 경기 선택 및 투표 로직 실행 (생략된 부분은 이전 코드와 동일)
-        st.write("경기를 선택하여 투표를 진행해 주세요.")
+        # 1. 경기 선택박스
+        game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_df.iterrows()]
+        selected_game_idx = st.selectbox("투표할 경기를 선택하세요", range(len(game_list)), format_func=lambda x: game_list[x])
+        game_info = sched_df.iloc[selected_game_idx]
+
+        # 2. 마감 시간 체크 (년, 월, 일, 시, 분 비교)
+        now = datetime.now()
+        try:
+            # 시트에 저장된 "2026-02-27 15:00" 같은 글자를 컴퓨터가 계산할 수 있는 시간으로 바꿉니다.
+            deadline = datetime.strptime(game_info['투표마감'], "%Y-%m-%d %H:%M")
+            
+            if now > deadline:
+                st.error(f"⚠️ 투표가 마감되었습니다. (마감 일시: {game_info['투표마감']})")
+                st.session_state.step = "locked" # 마감되면 입력창이 안 뜨게 상태 변경
+            else:
+                st.success(f"✅ 투표 가능 (마감: {game_info['투표마감']})")
+                # 투표 가능한 상태일 때만 아래 로직이 돌아가게 합니다.
+        except Exception as e:
+            st.error("마감 시간 형식에 오류가 있습니다. 관리자에게 문의하세요.")
+       
+        # 3. 투표 입력창 (마감이 아닐 때만 작동)
+        if st.session_state.step != "locked":
+            if st.session_state.step == "input":
+                # ... (기존의 이름, 연락처 입력하는 코드들) ...
+                st.write("정보를 입력하고 투표를 시작해 주세요.")
 
 with tabs[1]:
     st.subheader("📊 실시간 현황")
@@ -152,5 +176,6 @@ if st.session_state.is_admin:
                 conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=updated_admins)
                 st.success("해당 관리자가 삭제되었습니다.")
                 st.rerun()
+
 
 
