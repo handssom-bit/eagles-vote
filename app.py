@@ -117,7 +117,7 @@ with tab1:
                 })
             
             updated_df = pd.concat([existing_data, pd.DataFrame(new_rows)], ignore_index=True)
-            conn.update(spreadsheet=SHEET_URL, data=updated_df)
+            conn.update(spreadsheet=SHEET_URL, data=updated_df, worksheet="시트1")
             
             st.session_state.step = "done"
             st.rerun()
@@ -169,3 +169,4 @@ with tab3:
         
         csv = admin_data.to_csv(index=False).encode('utf-8-sig')
         st.download_button("엑셀(CSV) 다운로드", data=csv, file_name="hanhwa_vote.csv")
+
