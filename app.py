@@ -140,4 +140,65 @@ with tabs[1]:
             view_df.index.name = "No." # 인덱스 이름을 No.로 설정
             
             # 표 표시 (인덱스를 포함하여 표시)
-            st.table(view
+            st.table(view_df[["이름", "참석여부", "뒷풀이"]])
+        else: st.info("아직 투표 데이터가 없습니다.")
+
+# --- Tab 3, 4 (관리자 인증 및 설정 - 이전과 동일) ---
+with tabs[2]:
+    if not st.session_state.is_admin:
+        st.subheader("🔐 관리자 로그인")
+        admin_name = st.text_input("관리자 이름")
+        admin_phone = st.text_input("관리자 연락처(숫자만)", type="password")
+        if st.button("로그인"):
+            if admin_name == "윤상성" and admin_phone == "01032200995":
+                st.session_state.is_admin = True; st.rerun()
+            else:
+                admin_list = load_data(ADM_SHEET, ["이름", "연락처"])
+                if not admin_list[(admin_list['이름'] == admin_name) & (admin_list['연락처'].astype(str) == admin_phone)].empty:
+                    st.session_state.is_admin = True; st.rerun()
+                else: st.error("정보 불일치")
+    else:
+        st.success("✅ 관리자 로그인 중")
+        if st.button("로그아웃"): st.session_state.is_admin = False; st.rerun()
+
+if st.session_state.is_admin:
+    with tabs[3]:
+        st.header("⚙️ 관리자 제어 센터")
+        # ... (이전 코드의 일정 등록, 관리자 관리, 삭제 로직 유지) ...
+        with st.expander("📅 일정 등록", expanded=False):
+            with st.form("add_form"):
+                c1, c2 = st.columns(2)
+                g_date = c1.date_input("경기 날짜")
+                g_opp = c2.text_input("상대팀")
+                pm_times = [time(h, m) for h in range(12, 24) for m in [0, 30]]
+                g_time = c1.selectbox("경기 시작 시간 (오후)", pm_times, format_func=lambda x: x.strftime("%H:%M"))
+                st.divider()
+                d_date = st.date_input("마감 날짜", value=g_date)
+                d_time = st.time_input("마감 시간") 
+                if st.form_submit_button("일정 저장"):
+                    dead_str = datetime.combine(d_date, d_time).strftime("%Y-%m-%d %H:%M")
+                    new_game = pd.DataFrame([{"경기날짜": str(g_date), "상대팀": g_opp, "경기시간": g_time.strftime("%H:%M"), "투표마감": dead_str}])
+                    old_sch = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
+                    conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([old_sch, new_game], ignore_index=True))
+                    st.success("✅ 일정 등록 완료!"); st.rerun()
+
+        with st.expander("👤 관리자 명단 관리", expanded=False):
+            st.subheader("➕ 신규 관리자 추가")
+            n_name = st.text_input("새 관리자 이름")
+            n_phone = st.text_input("새 관리자 연락처(숫자만)")
+            if st.button("관리자 등록"):
+                if n_name and n_phone:
+                    old_adm = load_data(ADM_SHEET, ["이름", "연락처"])
+                    conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([old_adm, pd.DataFrame([{"이름": n_name, "연락처": n_phone}])], ignore_index=True))
+                    st.success(f"✅ {n_name} 등록 완료!"); st.rerun()
+
+        with st.expander("⚠️ 일정 및 데이터 삭제", expanded=False):
+            sch_to_del = load_data(SCH_SHEET, ["경기날짜", "상대팀"])
+            if not sch_to_del.empty:
+                opts = [f"{r['경기날짜']} vs {r['상대팀']}" for _, r in sch_to_del.iterrows()]
+                sel_del = st.selectbox("삭제할 일정 선택", opts)
+                confirm_check = st.checkbox(f"위의 '{sel_del}' 데이터를 삭제하시겠습니까?")
+                if st.button("🔥 일정 및 데이터 삭제", disabled=not confirm_check):
+                    updated_sch = sch_to_del.drop(sch_to_del.index[opts.index(sel_del)])
+                    conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=updated_sch)
+                    st.success("🗑️ 삭제 완료"); st.rerun()
