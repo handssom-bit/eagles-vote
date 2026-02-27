@@ -24,7 +24,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 SCH_SHEET = "경기일정"
 ADM_SHEET = "관리자명단"
-DATA_SHEET = "투표결과"  # 모든 투표 데이터가 저장될 통합 탭 이름
+DATA_SHEET = "투표결과" 
 
 def load_data(sheet_name, columns):
     try:
@@ -36,6 +36,7 @@ def load_data(sheet_name, columns):
 if 'is_admin' not in st.session_state: st.session_state.is_admin = False
 if 'step' not in st.session_state: st.session_state.step = "input"
 if 'user_info' not in st.session_state: st.session_state.user_info = {}
+if 'selected_game' not in st.session_state: st.session_state.selected_game = None
 
 # --- 4. 메인 화면 ---
 st.title("⚾ 한화이글스 단관 모집")
@@ -55,9 +56,11 @@ with tabs[0]:
     else:
         game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_df.iterrows()]
         
+        # 투표 완료 전에는 경기 선택창 표시
         if st.session_state.step != "done":
             selected_game_idx = st.selectbox("투표할 경기를 선택하세요", range(len(game_list)), format_func=lambda x: game_list[x])
             game_info = sched_df.iloc[selected_game_idx]
+            st.session_state.selected_game = game_list[selected_game_idx] # 선택된 경기 저장
             
             now = datetime.now()
             try:
@@ -99,9 +102,8 @@ with tabs[0]:
 
             elif current_step == "confirm":
                 if st.button("최종 제출"):
-                    # '투표결과' 탭에 데이터를 저장합니다.
                     existing_data = load_data(DATA_SHEET, ["경기정보", "날짜", "이름", "연락처", "참석여부", "뒷풀이"])
-                    game_tag = f"{game_info['경기날짜']} vs {game_info['상대팀']}"
+                    game_tag = st.session_state.selected_game
                     
                     new_rows = [{"경기정보": game_tag, "날짜": datetime.now().strftime("%Y-%m-%d %H:%M"), "이름": st.session_state.user_info['이름'], "연락처": st.session_state.user_info['연락처'], "참석여부": "참석", "뒷풀이": st.session_state.user_info['뒷풀이']}]
                     if st.session_state.user_info['plus_one']:
@@ -109,26 +111,40 @@ with tabs[0]:
                     
                     conn.update(spreadsheet=SHEET_URL, worksheet=DATA_SHEET, data=pd.concat([existing_data, pd.DataFrame(new_rows)], ignore_index=True))
                     st.session_state.step = "done"; st.rerun()
+        
+        # 투표 완료 화면
         else:
-            st.success("🎉 투표가 성공적으로 완료되었습니다!")
-            if st.button("새로 투표하기"):
-                st.session_state.step = "input"; st.session_state.user_info = {}; st.rerun()
+            st.balloons()
+            st.success(f"🎉 {st.session_state.selected_game} 경기 투표를 완료했습니다!")
+            st.info("참석 현황 탭에서 명단을 확인하실 수 있습니다.")
+            if st.button("🔄 다시 투표하기 (재투표)"):
+                st.session_state.step = "input"
+                st.session_state.user_info = {}
+                st.rerun()
 
-# --- Tab 2: 참석 현황 (필터링 방식) ---
+# --- Tab 2: 참석 현황 ---
 with tabs[1]:
     sched_df = load_data(SCH_SHEET, ["경기날짜", "상대팀"])
     if not sched_df.empty:
         game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_df.iterrows()]
-        selected_view = st.selectbox("현황 확인할 경기 선택", game_list)
         
-        # 전체 데이터에서 선택한 경기에 해당하는 것만 골라냅니다.
+        # 기본 선택값을 세션에 저장된 경기나 첫 번째 경기로 설정
+        default_idx = 0
+        if st.session_state.selected_game in game_list:
+            default_idx = game_list.index(st.session_state.selected_game)
+            
+        selected_view = st.selectbox("현황 확인할 경기 선택", game_list, index=default_idx)
+        
         all_data = load_data(DATA_SHEET, ["경기정보", "날짜", "이름", "연락처", "참석여부", "뒷풀이"])
         view_df = all_data[all_data['경기정보'] == selected_view]
         
         if not view_df.empty:
-            st.metric("총 인원", f"{len(view_df)}명")
+            st.metric("총 인원 (동반인 포함)", f"{len(view_df)}명")
             st.table(view_df[["이름", "참석여부", "뒷풀이"]])
-        else: st.info("아직 투표 데이터가 없습니다.")
+        else: 
+            st.info("아직 투표 데이터가 없습니다.")
+    else:
+        st.info("등록된 경기 일정이 없어 현황을 표시할 수 없습니다.")
 
 # --- Tab 3: 관리자 인증 ---
 with tabs[2]:
