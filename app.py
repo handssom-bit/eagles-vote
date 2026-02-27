@@ -3,7 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# --- 1. 페이지 설정 및 디자인 (화이트 테마) ---
+# --- 1. 페이지 설정 및 디자인 (화이트 테마 & 오렌지 포인트) ---
 st.set_page_config(page_title="한화이글스 단관 시스템 Pro", layout="centered")
 
 st.markdown("""
@@ -22,6 +22,7 @@ st.markdown("""
         height: 3.5em;
         font-weight: bold;
         transition: all 0.2s;
+        width: 100%;
     }
     /* 버튼 호버/클릭 효과: 오렌지 배경 + 흰색 글자 */
     div.stButton > button:hover, div.stButton > button:active {
@@ -80,7 +81,7 @@ with tabs[0]:
         selected_game_idx = st.selectbox("투표할 경기를 선택하세요", range(len(game_list)), format_func=lambda x: game_list[x])
         game_info = sched_df.iloc[selected_game_idx]
         
-        # 마감 시간 체크 (년-월-일 시:분 비교)
+        # 마감 시간 체크
         now = datetime.now()
         try:
             deadline = datetime.strptime(game_info['투표마감'], "%Y-%m-%d %H:%M")
@@ -104,6 +105,8 @@ with tabs[0]:
                     if name and phone:
                         st.session_state.user_info = {"이름": name, "연락처": phone, "plus_one": plus_one}
                         st.session_state.step = "step1"; st.rerun()
+                    else:
+                        st.warning("이름과 연락처를 입력해 주세요.")
             
             elif current_step == "step1":
                 st.subheader(f"🙋‍♂️ {st.session_state.user_info['이름']}님, 직관 오시나요?")
@@ -162,7 +165,7 @@ with tabs[2]:
             # 윤상성 관리자님 강제 승인 및 자동 등록 로직
             if admin_name == "윤상성" and admin_phone == "01032200995":
                 admin_list = load_data(ADM_SHEET, ["이름", "연락처"])
-                if admin_list[(admin_list['이름'] == "윤상성")].empty:
+                if admin_list.empty or admin_list[(admin_list['이름'] == "윤상성")].empty:
                     new_admin = pd.DataFrame([{"이름": "윤상성", "연락처": "01032200995"}])
                     conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([admin_list, new_admin], ignore_index=True))
                 st.session_state.is_admin = True; st.rerun()
@@ -175,10 +178,12 @@ with tabs[2]:
         st.success("✅ 관리자 권한으로 로그인 중입니다.")
         if st.button("로그아웃"): st.session_state.is_admin = False; st.rerun()
 
-# --- Tab 4: 관리자 설정 (마감 시간 년/월/일/시/분 적용) ---
+# --- Tab 4: 관리자 설정 (일정 등록 및 삭제) ---
 if st.session_state.is_admin:
     with tabs[3]:
         st.header("⚙️ 관리자 제어 센터")
+        
+        # 1. 경기 일정 등록
         with st.expander("📅 새 경기 일정 및 마감 설정", expanded=True):
             with st.form("new_game_form"):
                 c1, c2 = st.columns(2)
@@ -194,4 +199,33 @@ if st.session_state.is_admin:
                     new_game = pd.DataFrame([{"경기날짜": str(g_date), "상대팀": g_opp, "경기시간": str(g_time)[:5], "투표마감": deadline_str}])
                     old_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([old_sched, new_game], ignore_index=True))
-                    st.success("경기 일정이 등록되었습니다!")
+                    st.success("✅ 경기 일정이 등록되었습니다!")
+                    st.rerun()
+
+        # 2. 경기 일정 삭제
+        with st.expander("🗑️ 경기 일정 삭제"):
+            st.warning("⚠️ 일정을 삭제하면 목록에서 제거됩니다. 투표 데이터 탭은 수동 관리를 권장합니다.")
+            sched_to_del = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
+            if not sched_to_del.empty:
+                del_options = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_to_del.iterrows()]
+                selected_del = st.selectbox("삭제할 경기를 선택하세요", del_options)
+                if st.button("선택한 일정 삭제"):
+                    idx = del_options.index(selected_del)
+                    updated_sched = sched_to_del.drop(sched_to_del.index[idx])
+                    conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=updated_sched)
+                    st.success(f"🗑️ {selected_del} 삭제 완료")
+                    st.rerun()
+            else: st.info("등록된 일정이 없습니다.")
+
+        # 3. 관리자 명단 관리
+        with st.expander("👥 관리자 명단 관리"):
+            curr_admins = load_data(ADM_SHEET, ["이름", "연락처"])
+            st.table(curr_admins["이름"])
+            st.divider()
+            new_adm_name = st.text_input("신규 관리자 성함")
+            new_adm_phone = st.text_input("신규 관리자 연락처(숫자만)")
+            if st.button("관리자 임명"):
+                add_adm = pd.DataFrame([{"이름": new_adm_name, "연락처": new_adm_phone}])
+                conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([curr_admins, add_adm], ignore_index=True))
+                st.success("임명 완료")
+                st.rerun()
