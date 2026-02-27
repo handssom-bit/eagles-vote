@@ -1,0 +1,171 @@
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
+
+# --- 1. 페이지 설정 및 테마 ---
+st.set_page_config(page_title="한화이글스 단관 투표", layout="centered")
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #000000; color: #FFFFFF; }
+    .stButton>button { background-color: #FF6600; color: white; border-radius: 8px; font-weight: bold; width: 100%; }
+    .stHeader { color: #FF6600; }
+    .stCheckbox { color: #FF6600; }
+    div[data-testid="stMetricValue"] { color: #FF6600; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. 구글 시트 연결 ---
+# 실제 사용 시 SHEET_URL에 본인의 구글 시트 주소를 넣으세요.
+SHEET_URL = "여기에_복사한_구글시트_URL을_넣으세요"
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def get_data():
+    try:
+        return conn.read(spreadsheet=SHEET_URL, ttl="0s")
+    except:
+        return pd.DataFrame(columns=["날짜", "이름", "연락처", "참석여부", "뒷풀이"])
+
+# --- 3. 세션 상태 초기화 ---
+if 'step' not in st.session_state:
+    st.session_state.step = "input"
+if 'user_info' not in st.session_state:
+    st.session_state.user_info = {}
+
+# --- 4. 메인 화면 ---
+st.title("🍊 한화이글스 단관 모집")
+
+tab1, tab2, tab3 = st.tabs(["투표하기", "참석 현황", "관리자"])
+
+# --- Tab 1: 투표하기 ---
+with tab1:
+    if st.session_state.step == "input":
+        st.subheader("정보 입력")
+        
+        # "+1" 동반인 체크박스 (입력란 상단 배치)
+        plus_one = st.checkbox("+1 (동반인이 한 명 더 있나요?)")
+        
+        name = st.text_input("이름")
+        phone = st.text_input("연락처 (010-0000-0000)")
+        
+        if st.button("투표 시작"):
+            if name and phone:
+                st.session_state.user_info = {
+                    "이름": name, 
+                    "연락처": phone, 
+                    "plus_one": plus_one
+                }
+                st.session_state.step = "step1"
+                st.rerun()
+            else:
+                st.error("이름과 연락처를 입력해주세요.")
+
+    elif st.session_state.step == "step1":
+        st.subheader(f"🙋‍♂️ {st.session_state.user_info['이름']}님, 참석하시나요?")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🧡 단관참석"):
+                st.session_state.user_info['참석'] = "단관참석"
+                st.session_state.step = "step2"
+                st.rerun()
+        with col2:
+            st.button("미참석 (비활성)", disabled=True)
+
+    elif st.session_state.step == "step2":
+        st.subheader("🍻 뒷풀이 참석 여부")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("뒷풀이 참석"):
+                st.session_state.user_info['뒷풀이'] = "참석"
+                st.session_state.step = "confirm"
+                st.rerun()
+        with col2:
+            if st.button("뒷풀이 미참석"):
+                st.session_state.user_info['뒷풀이'] = "미참석"
+                st.session_state.step = "confirm"
+                st.rerun()
+
+    elif st.session_state.step == "confirm":
+        msg = f"본인: {st.session_state.user_info['참석']} / {st.session_state.user_info['뒷풀이']}"
+        if st.session_state.user_info['plus_one']:
+            msg += " (동반인 +1 포함)"
+        
+        st.warning(f"최종 확인: {msg}")
+        
+        if st.button("확인 완료 (제출)"):
+            existing_data = get_data()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
+            # 1. 본인 데이터 생성
+            new_rows = [{
+                "날짜": now_str,
+                "이름": st.session_state.user_info['이름'],
+                "연락처": st.session_state.user_info['연락처'],
+                "참석여부": st.session_state.user_info['참석'],
+                "뒷풀이": st.session_state.user_info['뒷풀이']
+            }]
+            
+            # 2. +1 체크 시 동반인 데이터 추가 (바로 아랫줄용)
+            if st.session_state.user_info['plus_one']:
+                new_rows.append({
+                    "날짜": now_str,
+                    "이름": "+1",
+                    "연락처": "-", # 동반인은 연락처 제외
+                    "참석여부": st.session_state.user_info['참석'],
+                    "뒷풀이": st.session_state.user_info['뒷풀이']
+                })
+            
+            updated_df = pd.concat([existing_data, pd.DataFrame(new_rows)], ignore_index=True)
+            conn.update(spreadsheet=SHEET_URL, data=updated_df)
+            
+            st.session_state.step = "done"
+            st.rerun()
+
+    elif st.session_state.step == "done":
+        st.success("투표가 완료되었습니다! 🧡")
+        if st.button("투표완료 (클릭 시 재투표)"):
+            # 재투표 로직은 '확인' 절차를 거칩니다.
+            st.session_state.step = "re-confirm"
+            st.rerun()
+            
+    elif st.session_state.step == "re-confirm":
+        st.info("정말 재투표 하시겠습니까? 기존 데이터는 삭제됩니다.")
+        col_y, col_n = st.columns(2)
+        with col_y:
+            if st.button("예"):
+                # 연락처가 일치하는 데이터(본인)와 그 바로 아래 "+1" 데이터 삭제 로직
+                data = get_data()
+                # 본인 데이터 삭제
+                data = data[data['연락처'] != st.session_state.user_info['연락처']]
+                # 참고: 정교한 삭제를 위해 실제 구현시에는 고유 ID를 쓰는게 좋으나, 현재는 연락처 기준으로 필터링합니다.
+                conn.update(spreadsheet=SHEET_URL, data=data)
+                st.session_state.step = "input"
+                st.rerun()
+        with col_n:
+            if st.button("아니요"):
+                st.session_state.step = "done"
+                st.rerun()
+
+# --- Tab 2: 참석 현황 (일반 사용자용) ---
+with tab2:
+    st.header("📊 실시간 투표 현황")
+    data = get_data()
+    if not data.empty:
+        total_count = len(data) # "+1" 포함 전체 행 개수
+        st.metric("총 참석 인원 (동반인 포함)", f"{total_count}명")
+        # 일반 사용자용 표 (연락처 제외)
+        st.dataframe(data[["이름", "참석여부", "뒷풀이"]], use_container_width=True)
+    else:
+        st.write("아직 투표자가 없습니다.")
+
+# --- Tab 3: 관리자 (Admin) ---
+with tab3:
+    pwd = st.text_input("관리자 암호", type="password")
+    if pwd == "eagles1234":
+        st.subheader("📋 전체 투표 데이터")
+        admin_data = get_data()
+        st.dataframe(admin_data) # 연락처 포함 전체 데이터
+        
+        csv = admin_data.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("엑셀(CSV) 다운로드", data=csv, file_name="hanhwa_vote.csv")
