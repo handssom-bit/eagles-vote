@@ -93,29 +93,42 @@ with tabs[2]:
             st.session_state.is_admin = False
             st.rerun()
 
-# --- Tab 3 (관리): 관리자 전용 페이지 (관리자만 보임) ---
+# --- Tab 3 (관리): 관리자 전용 페이지 ---
 if st.session_state.is_admin:
     with tabs[3]:
         st.header("⚙️ 관리자 제어 센터")
         
         # 1. 경기 일정 등록
-        with st.expander("📅 새 경기 일정 등록", expanded=True):
+        with st.expander("📅 새 경기 일정 및 마감 설정", expanded=True):
             with st.form("new_game_form"):
+                st.subheader("1. 경기 정보")
                 col1, col2 = st.columns(2)
                 g_date = col1.date_input("경기 날짜")
                 g_opp = col2.text_input("상대 팀 (예: LG, 삼성)")
                 g_time = col1.time_input("경기 시작 시간")
-                g_dead = col2.text_input("투표 마감 시간 (예: 15:00)")
                 
-                if st.form_submit_button("일정 저장"):
+                st.divider()
+                st.subheader("2. 투표 마감 일시 설정")
+                # 년, 월, 일, 시, 분을 한 번에 설정
+                col3, col4 = st.columns(2)
+                d_date = col3.date_input("마감 날짜", value=g_date) # 기본값은 경기 날짜
+                d_time = col4.time_input("마감 시간", value=datetime.strptime("12:00", "%H:%M").time())
+                
+                if st.form_submit_button("일정 및 마감 저장"):
+                    # 날짜와 시간을 합쳐서 "2024-06-15 15:00" 형식의 문자열 생성
+                    deadline_dt = datetime.combine(d_date, d_time)
+                    deadline_str = deadline_dt.strftime("%Y-%m-%d %H:%M")
+                    
                     new_game = pd.DataFrame([{
-                        "경기날짜": str(g_date), "상대팀": g_opp,
-                        "경기시간": str(g_time)[:5], "투표마감": g_dead
+                        "경기날짜": str(g_date), 
+                        "상대팀": g_opp,
+                        "경기시간": str(g_time)[:5], 
+                        "투표마감": deadline_str  # 년-월-일 시:분 형태로 저장
                     }])
+                    
                     old_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([old_sched, new_game], ignore_index=True))
-                    st.success(f"{g_date} 경기가 등록되었습니다!")
-
+                    st.success(f"✅ 등록 완료! 마감: {deadline_str}")
         # 2. 관리자 명단 관리
         with st.expander("👥 관리자 명단 관리"):
             curr_admins = load_data(ADM_SHEET, ["이름", "연락처"])
@@ -139,4 +152,5 @@ if st.session_state.is_admin:
                 conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=updated_admins)
                 st.success("해당 관리자가 삭제되었습니다.")
                 st.rerun()
+
 
