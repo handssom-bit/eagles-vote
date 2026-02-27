@@ -74,7 +74,7 @@ with tabs[2]:
             admin_list = load_data(ADM_SHEET, ["이름", "연락처"])
             
             # 첫 관리자 설정 (명단이 비어있을 때 본인 등록용)
-            if admin_list.empty and admin_name == "본인이름" and admin_phone == "본인전화번호":
+            if admin_list.empty and admin_name == "윤상성" and admin_phone == "01032200995":
                 new_admin = pd.DataFrame([{"이름": admin_name, "연락처": admin_phone}])
                 conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=new_admin)
                 st.session_state.is_admin = True
@@ -139,3 +139,4 @@ if st.session_state.is_admin:
                 conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=updated_admins)
                 st.success("해당 관리자가 삭제되었습니다.")
                 st.rerun()
+
