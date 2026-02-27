@@ -18,7 +18,8 @@ st.markdown("""
 
 # --- 2. 구글 시트 연결 ---
 # 실제 사용 시 SHEET_URL에 본인의 구글 시트 주소를 넣으세요.
-SHEET_URL = "여기에_복사한_구글시트_URL을_넣으세요"
+# Secrets에 저장된 주소를 자동으로 가져옵니다.
+SHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
@@ -169,4 +170,5 @@ with tab3:
         
         csv = admin_data.to_csv(index=False).encode('utf-8-sig')
         st.download_button("엑셀(CSV) 다운로드", data=csv, file_name="hanhwa_vote.csv")
+
 
