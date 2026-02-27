@@ -12,7 +12,7 @@ st.markdown("""
     h1, h2, h3, .stHeader { color: #FF6600 !important; }
     div.stButton > button {
         background-color: #FFFFFF; color: #FF6600; border: 2px solid #FF6600;
-        border-radius: 8px; height: 3.5em; font-weight: bold; transition: all 0.2s; width: 100%;
+        border-radius: 8px; height: 3.5em; font-weight: bold; width: 100%;
     }
     div.stButton > button:hover { background-color: #FF6600 !important; color: #FFFFFF !important; }
     </style>
@@ -52,13 +52,14 @@ with tabs[0]:
     if sched_df.empty:
         st.info("현재 등록된 경기 일정이 없습니다. 관리자에게 문의하세요.")
     else:
+        # 경기 목록 생성
         game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_df.iterrows()]
         
         if st.session_state.step != "done":
             selected_game_idx = st.selectbox("투표할 경기를 선택하세요", range(len(game_list)), format_func=lambda x: game_list[x])
             game_info = sched_df.iloc[selected_game_idx]
             
-            # 탭 이름 형식 정의 (MM-DD, 상대팀)
+            # 탭 이름 형식 (MM-DD, 상대팀)
             try:
                 dt_obj = datetime.strptime(game_info['경기날짜'], "%Y-%m-%d")
                 sheet_name = f"{dt_obj.strftime('%m-%d')}, {game_info['상대팀']}"
@@ -78,6 +79,7 @@ with tabs[0]:
                 st.error("마감 시간 형식 오류")
                 current_step = "locked"
 
+            # 투표 단계
             if current_step == "input":
                 st.subheader("📝 정보 입력")
                 plus_one = st.checkbox("+1 (동반인 포함)")
@@ -107,16 +109,19 @@ with tabs[0]:
             elif current_step == "confirm":
                 st.warning(f"최종 확인: {st.session_state.user_info['참석']} / 뒷풀이 {st.session_state.user_info['뒷풀이']}")
                 if st.button("최종 제출"):
-                    existing_data = load_data(sheet_name, ["날짜", "이름", "연락처", "참석여부", "뒷풀이"])
-                    new_rows = [{"날짜": datetime.now().strftime("%Y-%m-%d %H:%M"), "이름": st.session_state.user_info['이름'], "연락처": st.session_state.user_info['연락처'], "참석여부": "참석", "뒷풀이": st.session_state.user_info['뒷풀이']}]
-                    if st.session_state.user_info['plus_one']:
-                        new_rows.append({"날짜": "-", "이름": "+1", "연락처": "-", "참석여부": "참석", "뒷풀이": st.session_state.user_info['뒷풀이']})
-                    conn.update(spreadsheet=SHEET_URL, worksheet=sheet_name, data=pd.concat([existing_data, pd.DataFrame(new_rows)], ignore_index=True))
-                    st.session_state.step = "done"; st.rerun()
+                    try:
+                        existing_data = load_data(sheet_name, ["날짜", "이름", "연락처", "참석여부", "뒷풀이"])
+                        new_rows = [{"날짜": datetime.now().strftime("%Y-%m-%d %H:%M"), "이름": st.session_state.user_info['이름'], "연락처": st.session_state.user_info['연락처'], "참석여부": "참석", "뒷풀이": st.session_state.user_info['뒷풀이']}]
+                        if st.session_state.user_info['plus_one']:
+                            new_rows.append({"날짜": "-", "이름": "+1", "연락처": "-", "참석여부": "참석", "뒷풀이": st.session_state.user_info['뒷풀이']})
+                        
+                        conn.update(spreadsheet=SHEET_URL, worksheet=sheet_name, data=pd.concat([existing_data, pd.DataFrame(new_rows)], ignore_index=True))
+                        st.session_state.step = "done"; st.rerun()
+                    except Exception as e:
+                        st.error(f"구글 시트에 '{sheet_name}' 탭이 없습니다. 관리자에게 문의하세요.")
         else:
-            st.balloons()
             st.success("🎉 투표가 성공적으로 완료되었습니다!")
-            if st.button("새로 투표하기 (기존 정보 초기화)"):
+            if st.button("새로 투표하기"):
                 st.session_state.step = "input"; st.session_state.user_info = {}; st.rerun()
 
 # --- Tab 2: 참석 현황 ---
@@ -141,10 +146,12 @@ with tabs[2]:
     if not st.session_state.is_admin:
         st.subheader("🔐 관리자 로그인")
         admin_name = st.text_input("관리자 이름")
-        admin_phone = st.text_input("관리자 연락처", type="password")
+        admin_phone = st.text_input("관리자 연락처(숫자만)", type="password")
         if st.button("로그인"):
+            # 윤상성 관리자님 강제 승인 로직 (기존 버그 해결)
             if admin_name == "윤상성" and admin_phone == "01032200995":
                 admin_list = load_data(ADM_SHEET, ["이름", "연락처"])
+                # 명단이 비어있거나 내가 없으면 등록
                 if admin_list.empty or admin_list[admin_list['이름'] == "윤상성"].empty:
                     new_admin = pd.DataFrame([{"이름": "윤상성", "연락처": "01032200995"}])
                     conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([admin_list, new_admin], ignore_index=True))
@@ -153,12 +160,12 @@ with tabs[2]:
                 admin_list = load_data(ADM_SHEET, ["이름", "연락처"])
                 if not admin_list[(admin_list['이름'] == admin_name) & (admin_list['연락처'] == admin_phone)].empty:
                     st.session_state.is_admin = True; st.rerun()
-                else: st.error("정보 불일치")
+                else: st.error("정보 불일치. 이름을 확인해 주세요.")
     else:
-        st.success("관리자 로그인 중")
+        st.success("✅ 관리자 권한으로 로그인 중입니다.")
         if st.button("로그아웃"): st.session_state.is_admin = False; st.rerun()
 
-# --- Tab 4: 관리자 설정 ---
+# --- Tab 4: 관리자 설정 (자동 탭 생성) ---
 if st.session_state.is_admin:
     with tabs[3]:
         st.header("⚙️ 관리자 제어 센터")
@@ -178,7 +185,7 @@ if st.session_state.is_admin:
                     old_sch = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감"])
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([old_sch, new_game], ignore_index=True))
                     
-                    # 2. 새로운 투표 탭 자동 생성 및 초기화
+                    # 2. 새로운 투표 탭(05-10, LG 형식) 자동 생성 및 초기화
                     new_sheet_name = f"{g_date.strftime('%m-%d')}, {g_opp}"
                     initial_df = pd.DataFrame(columns=["날짜", "이름", "연락처", "참석여부", "뒷풀이"])
                     conn.update(spreadsheet=SHEET_URL, worksheet=new_sheet_name, data=initial_df)
