@@ -18,8 +18,13 @@ st.markdown("""
     div.vote-done > div.stButton > button {
         background-color: #FF6600 !important; color: #FFFFFF !important;
     }
-    div.stButton > button:hover { background-color: #FF6600 !important; color: #FFFFFF !important; }
+    /* 비활성화 버튼 스타일 */
+    div.stButton > button:disabled {
+        background-color: #EEEEEE !important; color: #999999 !important; border: 2px solid #CCCCCC !important;
+    }
+    div.stButton > button:hover:not(:disabled) { background-color: #FF6600 !important; color: #FFFFFF !important; }
     .game-box { border-bottom: 1px solid #eee; padding: 15px 0; margin-bottom: 10px; }
+    .status-badge { background-color: #FF0000; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-right: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -68,7 +73,7 @@ else:
 
 tabs = st.tabs(main_tabs)
 
-# --- [Tab 0 & 1: 투표하기 & 참석현황] ---
+# --- [Tab 0: 투표하기] ---
 with tabs[0]:
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감", "경기장소"])
     sched_df = get_active_games(raw_sched)
@@ -76,21 +81,59 @@ with tabs[0]:
     else:
         if st.session_state.step == "input":
             st.subheader("📢 경기 일정을 확인하고 투표해 주세요")
+            now = datetime.now()
             for index, row in sched_df.iterrows():
                 game_tag = f"{row['경기날짜']} vs {row['상대팀']}"
-                st.markdown(f'<div class="game-box"><b>📅 {row["경기날짜"]} ({row["경기시간"]}) vs {row["상대팀"]}</b><br>📍 {row["경기장소"]}</div>', unsafe_allow_html=True)
+                
+                # 투표 마감 여부 확인 로직
+                try:
+                    deadline_dt = datetime.strptime(row['투표마감'], "%Y-%m-%d %H:%M")
+                    is_expired = now > deadline_dt
+                except:
+                    is_expired = False
+
+                # 마감 시 [투표종료] 텍스트 추가
+                expire_txt = '<span class="status-badge">투표종료</span>' if is_expired else ""
+                st.markdown(f'''
+                    <div class="game-box">
+                        {expire_txt}<b>📅 {row["경기날짜"]} ({row["경기시간"]}) vs {row["상대팀"]}</b><br>
+                        📍 {row["경기장소"]}<br>
+                        <small style="color:{"#999" if is_expired else "red"};">⏰ 마감시간: {row["투표마감"]}</small>
+                    </div>''', unsafe_allow_html=True)
+                
                 is_voted = game_tag in st.session_state.voted_games
-                if is_voted: st.markdown('<div class="vote-done">', unsafe_allow_html=True)
-                if st.button("✅ 투표 완료 / 재투표", key=f"v_btn_{index}") if is_voted else st.button("🧡 투표하기", key=f"v_btn_{index}"):
-                    st.session_state.selected_game_info = row.to_dict(); st.session_state.step = "info_input"; st.rerun()
-                if is_voted: st.markdown('</div>', unsafe_allow_html=True)
+                
+                # 투표 종료 시 처리
+                if is_expired:
+                    if st.button("투표가 종료되었습니다", key=f"v_btn_{index}", disabled=True):
+                        pass # 비활성화 버튼
+                else:
+                    if is_voted: st.markdown('<div class="vote-done">', unsafe_allow_html=True)
+                    if st.button("✅ 투표 완료 / 재투표" if is_voted else "🧡 투표하기", key=f"v_btn_{index}"):
+                        st.session_state.selected_game_info = row.to_dict(); st.session_state.step = "info_input"; st.rerun()
+                    if is_voted: st.markdown('</div>', unsafe_allow_html=True)
+
         elif st.session_state.step == "info_input":
+            # (투표 프로세스 로직 유지)
             st.subheader(f"📝 {st.session_state.selected_game_info['경기날짜']} 정보 입력")
-            n = st.text_input("이름", key="n_f"); p = st.text_input("연락처 (숫자만)", key="p_f")
+            n = st.text_input("이름", key="n_f"); p = st.text_input("연락처", key="p_f")
             plus = st.checkbox("+1 (동반인 포함)", key="plus_f")
+            
+            # 여기서도 한 번 더 마감 체크 (부정 투표 방지)
+            now_check = datetime.now()
+            try:
+                deadline_dt = datetime.strptime(st.session_state.selected_game_info['투표마감'], "%Y-%m-%d %H:%M")
+                if now_check > deadline_dt:
+                    st.error("이미 종료된 투표입니다.")
+                    if st.button("처음으로"): st.session_state.step = "input"; st.rerun()
+                    st.stop()
+            except: pass
+
             if st.button("다음"):
                 if n and p: st.session_state.user_info = {"이름":n, "연락처":p.replace("-",""), "plus_one":plus}; st.session_state.step = "step1"; st.rerun()
                 else: st.warning("정보를 입력해 주세요.")
+        
+        # (step1, step2, confirm 로직 기존과 동일하게 유지)
         elif st.session_state.step == "step1":
             if st.button("🧡 단관참석"): st.session_state.user_info['참석']="참석"; st.session_state.step="step2"; st.rerun()
         elif st.session_state.step == "step2":
@@ -114,6 +157,7 @@ with tabs[0]:
                     st.success("✅ 저장 완료!"); sleep_time.sleep(1); st.session_state.step = "input"; st.rerun()
                 except Exception as e: st.error(f"❌ 저장 오류: {e}")
 
+# --- [Tab 1: 참석 현황] ---
 with tabs[1]:
     st.subheader("📊 실시간 참석 명단")
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간"])
@@ -130,7 +174,7 @@ with tabs[1]:
         else: st.warning(f"📢 '{sel_game}' 경기는 아직 투표 결과가 없습니다.")
     else: st.info("최근 경기 일정이 없습니다.")
 
-# --- [Tab 2~: 관리자 전용 기능] ---
+# --- [관리자 전용 기능 Tabs 2~5 로직 동일 유지] ---
 if not st.session_state.is_admin:
     with tabs[2]:
         st.subheader("🔐 관리자 로그인")
@@ -140,34 +184,26 @@ if not st.session_state.is_admin:
                 st.session_state.is_admin = True; st.rerun()
             else: st.error("정보 불일치")
 else:
-    # 1. 일정 등록 (초기화 기능 보강)
+    # 1. 일정 등록 (투표 마감 설정 포함)
     with tabs[2]:
         st.subheader("📅 새 경기 일정 등록")
-        # clear_on_submit=True를 사용하여 저장 후 입력창을 비웁니다.
         with st.form("add_game_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
-            d = c1.date_input("날짜", value=datetime.now())
+            d = c1.date_input("경기 날짜", value=datetime.now())
             o = c2.text_input("상대팀")
             l = st.text_input("경기 장소")
-            t = c1.selectbox("경기 시간", [time(h, m) for h in range(12, 24) for m in [0, 30]])
-            
-            submit_game = st.form_submit_button("일정 저장")
-            
-            if submit_game:
+            t = c1.selectbox("경기 시작 시간", [time(h, m) for h in range(12, 24) for m in [0, 30]])
+            st.divider()
+            col_d, col_t = st.columns(2)
+            deadline_date = col_d.date_input("투표 마감 날짜", value=d)
+            deadline_time = col_t.selectbox("투표 마감 시간", [time(h, m) for h in range(0, 24) for m in [0, 30, 59]], index=47)
+            if st.form_submit_button("일정 저장"):
                 if o and l:
-                    new_data = pd.DataFrame([{
-                        "경기날짜": str(d), 
-                        "상대팀": o, 
-                        "경기시간": t.strftime("%H:%M"), 
-                        "투표마감": str(d)+" 23:59", 
-                        "경기장소": l
-                    }])
+                    deadline_str = f"{deadline_date} {deadline_time.strftime('%H:%M')}"
+                    new_data = pd.DataFrame([{"경기날짜": str(d), "상대팀": o, "경기시간": t.strftime("%H:%M"), "투표마감": deadline_str, "경기장소": l}])
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([load_data(SCH_SHEET), new_data], ignore_index=True))
-                    st.success("✅ 일정이 성공적으로 저장되었습니다! 입력창이 초기화됩니다.")
-                    sleep_time.sleep(1)
-                    st.rerun()
-                else:
-                    st.warning("상대팀과 경기 장소를 모두 입력해주세요.")
+                    st.success(f"✅ 저장 완료!"); sleep_time.sleep(1); st.rerun()
+                else: st.warning("필수 입력 누락")
 
     # 2. 일정관리 및 데이터 삭제
     with tabs[3]:
@@ -176,37 +212,27 @@ else:
         if not sch_all.empty:
             opts = [f"{r['경기날짜']} vs {r['상대팀']}" for _, r in sch_all.iterrows()]
             sel_del = st.selectbox("삭제할 일정 선택", opts)
-            if st.button("🔥 일정 및 데이터 영구 삭제", disabled=not st.checkbox("데이터 삭제에 동의합니다.")):
+            if st.button("🔥 삭제 실행", disabled=not st.checkbox("삭제 동의")):
                 conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=sch_all[~sch_all.apply(lambda r: f"{r['경기날짜']} vs {r['상대팀']}" == sel_del, axis=1)])
-                all_v = load_data(VOTE_SHEET)
-                conn.update(spreadsheet=SHEET_URL, worksheet=VOTE_SHEET, data=all_v[all_v['경기정보'] != sel_del])
-                st.success("✅ 삭제 완료!"); st.rerun()
+                all_v = load_data(VOTE_SHEET); conn.update(spreadsheet=SHEET_URL, worksheet=VOTE_SHEET, data=all_v[all_v['경기정보'] != sel_del])
+                st.success("✅ 완료!"); st.rerun()
 
     # 3. 관리자 명단 관리
     with tabs[4]:
         st.subheader("👤 운영진 추가 및 삭제")
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown("### 운영진 추가")
-            an = st.text_input("이름", key="new_adm_name")
-            ap = st.text_input("연락처", key="new_adm_phone")
+            an = st.text_input("이름", key="new_adm_name"); ap = st.text_input("연락처", key="new_adm_phone")
             if st.button("운영진 등록"):
-                old = load_data(ADM_SHEET, ["이름", "연락처"])
-                conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([old, pd.DataFrame([{"이름": an, "연락처": ap}])], ignore_index=True))
-                st.success("✅ 등록 완료!"); st.rerun()
+                conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([load_data(ADM_SHEET), pd.DataFrame([{"이름": an, "연락처": ap}])], ignore_index=True))
+                st.success("✅ 등록 성공!"); st.rerun()
         with col_b:
-            st.markdown("### 운영진 삭제")
-            curr_adm = load_data(ADM_SHEET, ["이름", "연락처"])
-            adm_names = curr_adm[curr_adm['이름'] != "윤상성"]['이름'].tolist()
+            curr_adm = load_data(ADM_SHEET); adm_names = curr_adm[curr_adm['이름'] != "윤상성"]['이름'].tolist()
             if adm_names:
-                target_adm = st.selectbox("삭제할 관리자 선택", adm_names)
+                target_adm = st.selectbox("삭제 대상", adm_names)
                 if st.button("운영진 삭제하기"):
-                    conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=curr_adm[curr_adm['이름'] != target_adm])
-                    st.success("✅ 삭제 완료!"); st.rerun()
-            else: st.info("추가 운영진이 없습니다.")
+                    conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=curr_adm[curr_adm['이름'] != target_adm]); st.rerun()
 
     # 4. 로그아웃
     with tabs[5]:
-        if st.button("🔓 로그아웃 실행"):
-            st.session_state.is_admin = False
-            st.rerun()
+        if st.button("🔓 로그아웃 실행"): st.session_state.is_admin = False; st.rerun()
