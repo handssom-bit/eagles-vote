@@ -192,4 +192,4 @@ if st.session_state.is_admin:
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=updated_sch)
                     all_data = load_data(DATA_SHEET, ["경기정보", "날짜", "이름", "연락처", "참석여부", "뒷풀이"])
                     conn.update(spreadsheet=SHEET_URL, worksheet=DATA_SHEET, data=all_data[~all_data['경기정보'].str.contains(sel_del)])
-                    st.success("삭제 완료"); st.
+                    st.success("삭제 완료"); st.rerun()
