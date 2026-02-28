@@ -110,13 +110,13 @@ with tabs[0]:
             n = st.text_input("이름")
             p = st.text_input("연락처")
             plus = st.checkbox("+1 (동반인 포함)")
+            # 요청사항 반영: [취소] 버튼 삭제
             if st.button("다음"):
                 if n and p:
                     st.session_state.user_info = {"이름":n, "연락처":p.replace("-",""), "plus_one":plus}
                     st.session_state.step = "step1"
                     st.rerun()
                 else: st.warning("정보를 입력하세요.")
-            if st.button("취소"): st.session_state.step = "input"; st.rerun()
         
         elif st.session_state.step == "step1":
             if st.button("🧡 단관참석"): 
@@ -185,7 +185,6 @@ with tabs[1]:
             st.divider()
             view_df.reset_index(drop=True, inplace=True)
             view_df.index += 1
-            # [수정 포인트] 참석여부를 연락처로 변경하여 표시
             st.table(view_df[["이름", "연락처", "뒷풀이"]])
         else:
             st.warning(f"📢 '{sel_game}' 경기는 아직 투표 결과가 없습니다.")
@@ -212,7 +211,7 @@ else:
             d, o, l = c1.date_input("날짜"), c2.text_input("상대팀"), st.text_input("장소")
             t = c1.selectbox("시작", [time(h, m) for h in range(12, 24) for m in [0, 30]])
             mt = st.selectbox("마감 시간", [time(h, m) for h in range(0, 24) for m in [0, 30, 59]], index=47)
-            if st.form_submit_button("일정 저장"):
+            if st.form_submit_button("저장"):
                 old = load_data(SCH_SHEET, SCH_COLS)
                 new_g = pd.DataFrame([{"경기날짜": str(d), "상대팀": o, "경기시간": t.strftime("%H:%M"), "투표마감": f"{d} {mt.strftime('%H:%M')}", "경기장소": l}])
                 conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([old, new_g], ignore_index=True))
