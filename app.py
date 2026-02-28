@@ -59,8 +59,7 @@ if 'user_info' not in st.session_state: st.session_state.user_info = {}
 if 'selected_game_info' not in st.session_state: st.session_state.selected_game_info = {}
 if 'voted_games' not in st.session_state: st.session_state.voted_games = []
 
-# --- 4. 메인 화면 탭 정의 ---
-# 로그인 상태에 따라 보여줄 탭 리스트를 구성합니다.
+# --- 4. 메인 화면 탭 구성 ---
 main_tabs = ["투표하기", "참석 현황"]
 if not st.session_state.is_admin:
     main_tabs.append("관리자 인증")
@@ -69,7 +68,7 @@ else:
 
 tabs = st.tabs(main_tabs)
 
-# --- Tab: 투표하기 ---
+# --- [Tab 0 & 1: 투표하기 & 참석현황] ---
 with tabs[0]:
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감", "경기장소"])
     sched_df = get_active_games(raw_sched)
@@ -82,7 +81,7 @@ with tabs[0]:
                 st.markdown(f'<div class="game-box"><b>📅 {row["경기날짜"]} ({row["경기시간"]}) vs {row["상대팀"]}</b><br>📍 {row["경기장소"]}</div>', unsafe_allow_html=True)
                 is_voted = game_tag in st.session_state.voted_games
                 if is_voted: st.markdown('<div class="vote-done">', unsafe_allow_html=True)
-                if st.button("✅ 투표 완료 / 재투표" if is_voted else "🧡 투표하기", key=f"v_btn_{index}"):
+                if st.button("✅ 투표 완료 / 재투표", key=f"v_btn_{index}") if is_voted else st.button("🧡 투표하기", key=f"v_btn_{index}"):
                     st.session_state.selected_game_info = row.to_dict(); st.session_state.step = "info_input"; st.rerun()
                 if is_voted: st.markdown('</div>', unsafe_allow_html=True)
         elif st.session_state.step == "info_input":
@@ -115,14 +114,13 @@ with tabs[0]:
                     st.success("✅ 저장 완료!"); sleep_time.sleep(1); st.session_state.step = "input"; st.rerun()
                 except Exception as e: st.error(f"❌ 저장 오류: {e}")
 
-# --- Tab: 참석 현황 ---
 with tabs[1]:
     st.subheader("📊 실시간 참석 명단")
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간"])
     visible_sched = get_active_games(raw_sched)
     if not visible_sched.empty:
         game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in visible_sched.iterrows()]
-        sel_game = st.selectbox("경기를 선택하세요", game_list, key="sel_f")
+        sel_game = st.selectbox("경기를 선택하세요", game_list, key="stat_sel")
         all_res = load_data(VOTE_SHEET)
         view_df = all_res[all_res['경기정보'] == sel_game].copy()
         if not view_df.empty:
@@ -132,29 +130,46 @@ with tabs[1]:
         else: st.warning(f"📢 '{sel_game}' 경기는 아직 투표 결과가 없습니다.")
     else: st.info("최근 경기 일정이 없습니다.")
 
-# --- Tab: 관리자 인증 (로그인 전 전용) ---
+# --- [Tab 2~: 관리자 전용 기능] ---
 if not st.session_state.is_admin:
     with tabs[2]:
         st.subheader("🔐 관리자 로그인")
-        ln = st.text_input("이름", key="a_n_f"); lp = st.text_input("연락처", type="password", key="a_p_f")
+        ln = st.text_input("이름", key="a_n"); lp = st.text_input("연락처", type="password", key="a_p")
         if st.button("로그인"):
             if (ln == "윤상성" and lp == "01032200995") or not load_data(ADM_SHEET)[(load_data(ADM_SHEET)['이름']==ln) & (load_data(ADM_SHEET)['연락처'].astype(str)==lp)].empty:
                 st.session_state.is_admin = True; st.rerun()
             else: st.error("정보 불일치")
 else:
-    # --- Tab: 일정 등록 (인증 후 노출) ---
+    # 1. 일정 등록 (초기화 기능 보강)
     with tabs[2]:
         st.subheader("📅 새 경기 일정 등록")
-        with st.form("add_game_form"):
+        # clear_on_submit=True를 사용하여 저장 후 입력창을 비웁니다.
+        with st.form("add_game_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
-            d, o, l = c1.date_input("날짜"), c2.text_input("상대팀"), st.text_input("경기 장소")
+            d = c1.date_input("날짜", value=datetime.now())
+            o = c2.text_input("상대팀")
+            l = st.text_input("경기 장소")
             t = c1.selectbox("경기 시간", [time(h, m) for h in range(12, 24) for m in [0, 30]])
-            if st.form_submit_button("일정 저장"):
-                new = pd.DataFrame([{"경기날짜": str(d), "상대팀": o, "경기시간": t.strftime("%H:%M"), "투표마감": str(d)+" 23:59", "경기장소": l}])
-                conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([load_data(SCH_SHEET), new], ignore_index=True))
-                st.success("✅ 등록 완료!"); st.rerun()
+            
+            submit_game = st.form_submit_button("일정 저장")
+            
+            if submit_game:
+                if o and l:
+                    new_data = pd.DataFrame([{
+                        "경기날짜": str(d), 
+                        "상대팀": o, 
+                        "경기시간": t.strftime("%H:%M"), 
+                        "투표마감": str(d)+" 23:59", 
+                        "경기장소": l
+                    }])
+                    conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([load_data(SCH_SHEET), new_data], ignore_index=True))
+                    st.success("✅ 일정이 성공적으로 저장되었습니다! 입력창이 초기화됩니다.")
+                    sleep_time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("상대팀과 경기 장소를 모두 입력해주세요.")
 
-    # --- Tab: 일정관리 및 데이터 삭제 (인증 후 노출) ---
+    # 2. 일정관리 및 데이터 삭제
     with tabs[3]:
         st.subheader("⚠️ 일정관리 및 데이터 삭제")
         sch_all = load_data(SCH_SHEET, ["경기날짜", "상대팀"])
@@ -167,13 +182,14 @@ else:
                 conn.update(spreadsheet=SHEET_URL, worksheet=VOTE_SHEET, data=all_v[all_v['경기정보'] != sel_del])
                 st.success("✅ 삭제 완료!"); st.rerun()
 
-    # --- Tab: 관리자 명단 관리 (인증 후 노출) ---
+    # 3. 관리자 명단 관리
     with tabs[4]:
         st.subheader("👤 운영진 추가 및 삭제")
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("### 운영진 추가")
-            an, ap = st.text_input("이름", key="n_an"), st.text_input("연락처", key="n_ap")
+            an = st.text_input("이름", key="new_adm_name")
+            ap = st.text_input("연락처", key="new_adm_phone")
             if st.button("운영진 등록"):
                 old = load_data(ADM_SHEET, ["이름", "연락처"])
                 conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=pd.concat([old, pd.DataFrame([{"이름": an, "연락처": ap}])], ignore_index=True))
@@ -189,9 +205,8 @@ else:
                     st.success("✅ 삭제 완료!"); st.rerun()
             else: st.info("추가 운영진이 없습니다.")
 
-    # --- Tab: 로그아웃 ---
+    # 4. 로그아웃
     with tabs[5]:
-        st.subheader("관리자 모드 종료")
         if st.button("🔓 로그아웃 실행"):
             st.session_state.is_admin = False
             st.rerun()
