@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta, time
 import time as sleep_time
 
-# --- 1. 페이지 설정 및 디자인 ---
+# --- 1. 페이지 설정 및 디자인 (기존 스타일 유지) ---
 st.set_page_config(page_title="한화이글스 단관 시스템 Pro", layout="centered")
 
 st.markdown("""
@@ -38,19 +38,17 @@ def load_data(sheet_name, columns=COLS):
         return df if df is not None and not df.empty else pd.DataFrame(columns=columns)
     except: return pd.DataFrame(columns=columns)
 
-# --- [핵심] 24시간 이내의 경기만 필터링하는 함수 ---
+# --- [유지] 24시간 자동 숨김 필터링 ---
 def get_active_games(df):
     if df.empty: return df
     now = datetime.now()
     active_indices = []
     for idx, row in df.iterrows():
         try:
-            # 경기날짜(YYYY-MM-DD)와 경기시간(HH:MM) 결합
             game_dt = datetime.strptime(f"{row['경기날짜']} {row['경기시간']}", "%Y-%m-%d %H:%M")
-            # 경기 시간으로부터 24시간이 지나지 않았으면 유지
             if now <= game_dt + timedelta(hours=24):
                 active_indices.append(idx)
-        except: active_indices.append(idx) # 형식 오류 시 일단 표시
+        except: active_indices.append(idx)
     return df.loc[active_indices]
 
 # --- 3. 세션 상태 ---
@@ -66,10 +64,10 @@ tab_titles = ["투표하기", "참석 현황", "관리자 인증"]
 if st.session_state.is_admin: tab_titles.append("⚙️ 관리자 설정")
 tabs = st.tabs(tab_titles)
 
-# --- Tab 1: 투표하기 (자동 숨김 적용) ---
+# --- Tab 1: 투표하기 (UI 및 로직 유지) ---
 with tabs[0]:
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간", "투표마감", "경기장소"])
-    sched_df = get_active_games(raw_sched) # 24시간 지난 경기 제외
+    sched_df = get_active_games(raw_sched)
     
     if sched_df.empty:
         st.info("현재 투표 가능한 경기 일정이 없습니다.")
@@ -92,7 +90,7 @@ with tabs[0]:
             st.subheader(f"📝 {info['경기날짜']} 정보 입력")
             n, p = st.text_input("이름"), st.text_input("연락처")
             plus = st.checkbox("+1 (동반인 포함)")
-            if st.button("다음"):
+            if st.button("다음 단계"):
                 if n and p: st.session_state.user_info = {"이름":n, "연락처":p, "plus_one":plus}; st.session_state.step = "step1"; st.rerun()
                 else: st.warning("입력 필수")
         
@@ -109,20 +107,25 @@ with tabs[0]:
                 info, user = st.session_state.selected_game_info, st.session_state.user_info
                 tag = f"{info['경기날짜']} vs {info['상대팀']}"
                 new_row = {"경기정보": tag, "경기장소": info['경기장소'], "날짜": datetime.now().strftime("%Y-%m-%d %H:%M"), "이름": user['이름'], "연락처": user['연락처'], "참석여부": "참석", "뒷풀이": user['뒷풀이']}
+                
+                # [데이터 안정화] 통합 탭 저장 로직
                 df = load_data(VOTE_SHEET)
                 if not df.empty:
+                    # [유지] 재투표 덮어쓰기 로직
                     df = df[~((df['경기정보']==tag) & (df['이름']==user['이름']) & (df['연락처']==user['연락처']))]
                     df = df[~((df['경기정보']==tag) & (df['이름']=="+1") & (df['연락처']=="-"))]
+                
                 rows = [new_row]
                 if user['plus_one']: rows.append({**new_row, "이름": "+1", "연락처": "-", "날짜": "-"})
                 conn.update(spreadsheet=SHEET_URL, worksheet=VOTE_SHEET, data=pd.concat([df, pd.DataFrame(rows)], ignore_index=True))
+                
                 if tag not in st.session_state.voted_games: st.session_state.voted_games.append(tag)
-                st.success("저장 완료!"); sleep_time.sleep(1); st.session_state.step = "input"; st.rerun()
+                st.success("✅ 저장 완료!"); sleep_time.sleep(1); st.session_state.step = "input"; st.rerun()
 
-# --- Tab 2: 참석 현황 (자동 숨김 적용) ---
+# --- Tab 2: 참석 현황 (유지) ---
 with tabs[1]:
     raw_sched = load_data(SCH_SHEET, ["경기날짜", "상대팀", "경기시간"])
-    sched_df = get_active_games(raw_sched) # 24시간 지난 경기 현황도 숨김
+    sched_df = get_active_games(raw_sched)
     if not sched_df.empty:
         game_list = [f"{row['경기날짜']} vs {row['상대팀']}" for _, row in sched_df.iterrows()]
         sel_game = st.selectbox("현황 확인", game_list)
@@ -133,21 +136,23 @@ with tabs[1]:
             view_df.reset_index(drop=True, inplace=True); view_df.index += 1
             st.table(view_df[["이름", "참석여부", "뒷풀이"]])
         else: st.info("데이터 없음")
-    else: st.info("진행 중인 경기가 없습니다.")
 
-# --- Tab 3, 4 (관리자 기능 - 삭제 기능 유지) ---
+# --- Tab 3: 관리자 인증 (유지) ---
 with tabs[2]:
     if not st.session_state.is_admin:
+        st.subheader("🔐 관리자 로그인")
         ln = st.text_input("이름", key="adm_n"); lp = st.text_input("연락처", type="password", key="adm_p")
         if st.button("로그인"):
             if (ln == "윤상성" and lp == "01032200995") or not load_data(ADM_SHEET)[(load_data(ADM_SHEET)['이름']==ln) & (load_data(ADM_SHEET)['연락처'].astype(str)==lp)].empty:
                 st.session_state.is_admin = True; st.rerun()
             else: st.error("실패")
-    else: st.success("관리자 모드"); st.button("로그아웃", on_click=lambda: setattr(st.session_state, 'is_admin', False))
+    else:
+        st.success("관리자 모드"); st.button("로그아웃", on_click=lambda: setattr(st.session_state, 'is_admin', False))
 
+# --- Tab 4: 관리자 설정 (유지: 등록/삭제 기능) ---
 if st.session_state.is_admin:
     with tabs[3]:
-        with st.expander("📅 일정 등록", expanded=False):
+        with st.expander("📅 일정 등록"):
             with st.form("add"):
                 c1,c2 = st.columns(2); d,o,l = c1.date_input("날짜"), c2.text_input("팀"), st.text_input("장소")
                 t = c1.selectbox("시간", [time(h,m) for h in range(12,24) for m in [0,30]])
@@ -155,7 +160,7 @@ if st.session_state.is_admin:
                     new = pd.DataFrame([{"경기날짜":str(d),"상대팀":o,"경기시간":t.strftime("%H:%M"),"투표마감":str(d)+" 23:59","경기장소":l}])
                     conn.update(spreadsheet=SHEET_URL, worksheet=SCH_SHEET, data=pd.concat([load_data(SCH_SHEET), new], ignore_index=True)); st.rerun()
 
-        with st.expander("👤 관리자 삭제", expanded=True):
+        with st.expander("👤 관리자 삭제"):
             curr = load_data(ADM_SHEET)
             names = curr[curr['이름'] != "윤상성"]['이름'].tolist()
             if names:
@@ -163,7 +168,7 @@ if st.session_state.is_admin:
                 if st.button("운영진 삭제"):
                     conn.update(spreadsheet=SHEET_URL, worksheet=ADM_SHEET, data=curr[curr['이름'] != target]); st.rerun()
 
-        with st.expander("⚠️ 데이터 수동 삭제", expanded=False):
+        with st.expander("⚠️ 데이터 수동 삭제"):
             sch = load_data(SCH_SHEET)
             if not sch.empty:
                 opts = [f"{r['경기날짜']} vs {r['상대팀']}" for _, r in sch.iterrows()]
